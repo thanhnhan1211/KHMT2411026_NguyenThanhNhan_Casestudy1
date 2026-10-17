@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/transaction_model.dart';
+import '../repositories/transaction_repository.dart';
+import '../utils/category_helper.dart';
 
-/// Dùng chung cho cả "Thêm giao dịch" và "Sửa giao dịch".
-/// transaction == null  -> Thêm
-/// transaction != null  -> Sửa (điền sẵn dữ liệu)
+/// Dùng chung cho "Thêm giao dịch" và "Sửa giao dịch".
+/// transaction == null -> Thêm | transaction != null -> Sửa.
+/// Bấm Lưu: ghi vào SQLite rồi pop(true) để màn trước tải lại dữ liệu.
 class TransactionFormScreen extends StatefulWidget {
   final TransactionModel? transaction;
 
@@ -14,18 +16,10 @@ class TransactionFormScreen extends StatefulWidget {
 }
 
 class _TransactionFormScreenState extends State<TransactionFormScreen> {
-  static const Map<String, IconData> _categories = {
-    'Ăn uống': Icons.restaurant,
-    'Di chuyển': Icons.directions_car,
-    'Mua sắm': Icons.shopping_bag,
-    'Giải trí': Icons.movie,
-    'Hóa đơn': Icons.receipt_long,
-    'Lương': Icons.account_balance_wallet,
-    'Khác': Icons.more_horiz,
-  };
-
   static const Color _expenseColor = Color(0xFFFF5A5F);
   static const Color _incomeColor = Color(0xFF2E9E5B);
+
+  final _repo = TransactionRepository();
 
   late String _type;
   late String _category;
@@ -33,6 +27,7 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
   final _amountCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
   final _dateCtrl = TextEditingController();
+  bool _saving = false;
 
   bool get _isEdit => widget.transaction != null;
 
@@ -41,10 +36,10 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
     super.initState();
     final t = widget.transaction;
     _type = t?.type ?? 'expense';
-    _category = t?.category ?? 'Ăn uống';
+    _category = t?.category ?? CategoryHelper.byType(_type).first;
     _date = DateTime.now();
     if (t != null) {
-      _amountCtrl.text = _formatMoney(t.amount);
+      _amountCtrl.text = CategoryHelper.formatMoney(t.amount);
       _noteCtrl.text = t.note;
       final p = t.date.split('/');
       if (p.length == 3) {
@@ -62,13 +57,16 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
     super.dispose();
   }
 
-  String _formatMoney(double v) => v
-      .toInt()
-      .toString()
-      .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.');
-
   String _formatDate(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  void _changeType(String value) {
+    setState(() {
+      _type = value;
+      final list = CategoryHelper.byType(value);
+      if (!list.contains(_category)) _category = list.first;
+    });
+  }
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -85,32 +83,48 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
     }
   }
 
-  void _save() {
-    final amount = double.tryParse(_amountCtrl.text.replaceAll('.', '').trim());
+  void _showMessage(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final amount =
+        double.tryParse(_amountCtrl.text.replaceAll('.', '').trim());
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng nhập số tiền hợp lệ')),
-      );
+      _showMessage('Vui lòng nhập số tiền hợp lệ');
       return;
     }
-    Navigator.pop(
-      context,
-      TransactionModel(
+
+    setState(() => _saving = true);
+    try {
+      final t = TransactionModel(
         id: widget.transaction?.id,
         type: _type,
         category: _category,
         amount: amount,
         date: _formatDate(_date),
         note: _noteCtrl.text.trim(),
-      ),
-    );
+      );
+      if (_isEdit) {
+        await _repo.update(t);
+      } else {
+        await _repo.insert(t);
+      }
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _showMessage('Lưu thất bại: $e');
+    }
   }
 
   Widget _typeButton(String label, String value, Color color) {
     final selected = _type == value;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _type = value),
+        onTap: () => _changeType(value),
         child: Container(
           height: 44,
           alignment: Alignment.center,
@@ -192,25 +206,26 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
                     ),
                     _label('Danh mục'),
                     DropdownButtonFormField<String>(
+                      key: ValueKey(_type), // vẽ lại khi đổi loại
                       value: _category,
                       icon: const Icon(Icons.keyboard_arrow_down),
                       decoration: _inputDecoration(),
-                      items: _categories.entries
-                          .map((e) => DropdownMenuItem(
-                                value: e.key,
+                      items: CategoryHelper.byType(_type)
+                          .map((name) => DropdownMenuItem(
+                                value: name,
                                 child: Row(
                                   children: [
                                     Container(
                                       padding: const EdgeInsets.all(5),
                                       decoration: BoxDecoration(
-                                        color: _expenseColor,
+                                        color: CategoryHelper.color(name),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
-                                      child: Icon(e.value,
+                                      child: Icon(CategoryHelper.icon(name),
                                           size: 16, color: Colors.white),
                                     ),
                                     const SizedBox(width: 10),
-                                    Text(e.key),
+                                    Text(name),
                                   ],
                                 ),
                               ))
@@ -261,16 +276,23 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _save,
+                  onPressed: _saving ? null : _save,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF1565C0),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: const Text('Lưu',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Lưu',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
               ),
             ),

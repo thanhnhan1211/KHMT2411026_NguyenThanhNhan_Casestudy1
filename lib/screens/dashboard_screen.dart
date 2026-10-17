@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/transaction_model.dart';
+import '../repositories/transaction_repository.dart';
+import '../utils/category_helper.dart';
 import 'transaction_form_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -14,109 +16,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
   static const Color _green = Color(0xFF2E9E5B);
   static const Color _red = Color(0xFFE53935);
 
-  // Dữ liệu mẫu (buổi 5-6 sẽ thay bằng dữ liệu từ SQLite)
-  final List<TransactionModel> _transactions = [
-    TransactionModel(
-        id: 1,
-        type: 'expense',
-        category: 'Ăn uống',
-        amount: 100000,
-        date: '12/04/2025',
-        note: 'Ăn trưa'),
-    TransactionModel(
-        id: 2,
-        type: 'expense',
-        category: 'Mua sắm',
-        amount: 500000,
-        date: '10/04/2025'),
-    TransactionModel(
-        id: 3,
-        type: 'income',
-        category: 'Lương',
-        amount: 10000000,
-        date: '05/04/2025'),
-    TransactionModel(
-        id: 4,
-        type: 'expense',
-        category: 'Hóa đơn',
-        amount: 4400000,
-        date: '01/04/2025'),
-  ];
+  final _repo = TransactionRepository();
 
-  double get _totalIncome => _transactions
-      .where((t) => t.type == 'income')
-      .fold(0.0, (s, t) => s + t.amount);
+  List<TransactionModel> _recent = [];
+  double _totalIncome = 0;
+  double _totalExpense = 0;
+  bool _loading = true;
 
-  double get _totalExpense => _transactions
-      .where((t) => t.type == 'expense')
-      .fold(0.0, (s, t) => s + t.amount);
-
-  String _money(double v) => v
-      .toInt()
-      .toString()
-      .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.');
-
-  IconData _icon(String category) {
-    switch (category) {
-      case 'Ăn uống':
-        return Icons.restaurant;
-      case 'Mua sắm':
-        return Icons.shopping_cart;
-      case 'Lương':
-        return Icons.account_balance_wallet;
-      case 'Di chuyển':
-        return Icons.directions_car;
-      case 'Giải trí':
-        return Icons.movie;
-      case 'Hóa đơn':
-        return Icons.receipt_long;
-      default:
-        return Icons.more_horiz;
-    }
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
   }
 
-  Color _color(String category) {
-    switch (category) {
-      case 'Ăn uống':
-        return const Color(0xFFFF5A5F);
-      case 'Mua sắm':
-        return const Color(0xFF29B6F6);
-      case 'Lương':
-        return const Color(0xFF4CAF50);
-      case 'Di chuyển':
-        return const Color(0xFF9C6ADE);
-      case 'Giải trí':
-        return const Color(0xFFFFA726);
-      case 'Hóa đơn':
-        return const Color(0xFF5C6BC0);
-      default:
-        return Colors.grey;
-    }
+  /// Đọc dữ liệu từ SQLite để hiển thị lên Dashboard.
+  Future<void> _loadData() async {
+    final recent = await _repo.getRecent(limit: 3);
+    final income = await _repo.getTotalIncome();
+    final expense = await _repo.getTotalExpense();
+    if (!mounted) return;
+    setState(() {
+      _recent = recent;
+      _totalIncome = income;
+      _totalExpense = expense;
+      _loading = false;
+    });
   }
 
+  /// Mở form Thêm (t == null) hoặc Sửa (t != null), quay lại thì tải lại.
   Future<void> _openForm([TransactionModel? t]) async {
-    final result = await Navigator.push<TransactionModel>(
+    final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => TransactionFormScreen(transaction: t)),
     );
-    if (result == null) return;
-    setState(() {
-      if (t == null) {
-        _transactions.insert(
-            0,
-            TransactionModel(
-              id: DateTime.now().millisecondsSinceEpoch,
-              type: result.type,
-              category: result.category,
-              amount: result.amount,
-              date: result.date,
-              note: result.note,
-            ));
-      } else {
-        final i = _transactions.indexWhere((x) => x.id == t.id);
-        if (i != -1) _transactions[i] = result;
-      }
-    });
+    if (saved == true) _loadData();
   }
 
   Widget _header() {
@@ -166,11 +99,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
+        boxShadow: const [
           BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Color(0x14000000),
               blurRadius: 12,
-              offset: const Offset(0, 4)),
+              offset: Offset(0, 4)),
         ],
       ),
       child: Row(
@@ -183,9 +116,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style:
                         TextStyle(color: Colors.grey.shade600, fontSize: 13)),
                 const SizedBox(height: 6),
-                Text('${_money(balance)} đ',
-                    style: const TextStyle(
-                        fontSize: 24, fontWeight: FontWeight.bold)),
+                Text(
+                  '${balance < 0 ? '-' : ''}${CategoryHelper.formatMoney(balance.abs())} đ',
+                  style: const TextStyle(
+                      fontSize: 24, fontWeight: FontWeight.bold),
+                ),
               ],
             ),
           ),
@@ -216,7 +151,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 10),
             Text(label, style: TextStyle(color: color, fontSize: 13)),
             const SizedBox(height: 4),
-            Text('${_money(value)} đ',
+            Text('${CategoryHelper.formatMoney(value)} đ',
                 style: const TextStyle(
                     fontSize: 16, fontWeight: FontWeight.bold)),
           ],
@@ -237,9 +172,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                  color: _color(t.category),
+                  color: CategoryHelper.color(t.category),
                   borderRadius: BorderRadius.circular(12)),
-              child: Icon(_icon(t.category), color: Colors.white),
+              child: Icon(CategoryHelper.icon(t.category), color: Colors.white),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -257,7 +192,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
             Text(
-              '${isIncome ? '+' : '-'}${_money(t.amount)} đ',
+              '${isIncome ? '+' : '-'}${CategoryHelper.formatMoney(t.amount)} đ',
               style: TextStyle(
                   color: isIncome ? _green : _red,
                   fontWeight: FontWeight.bold,
@@ -270,83 +205,89 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _recentList() {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 30),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_recent.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 30),
+        child: Center(
+          child: Text('Chưa có giao dịch nào.\nBấm nút + để thêm mới.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600, height: 1.5)),
+        ),
+      );
+    }
+    return Column(children: _recent.map(_item).toList());
+  }
+
   @override
   Widget build(BuildContext context) {
-    final recent = _transactions.take(3).toList();
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
                 children: [
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      SafeArea(
-                        bottom: false,
-                        child: _header(),
-                      ),
-                      Positioned(
-                        left: 20,
-                        right: 20,
-                        bottom: -40,
-                        child: _balanceCard(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 56),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            _summaryCard(
-                                'Thu nhập',
-                                _totalIncome,
-                                Icons.arrow_upward,
-                                _green,
-                                const Color(0xFFDFF3E6)),
-                            const SizedBox(width: 14),
-                            _summaryCard(
-                                'Chi tiêu',
-                                _totalExpense,
-                                Icons.arrow_downward,
-                                _red,
-                                const Color(0xFFFDE4E4)),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Chi tiêu gần đây',
-                                style: TextStyle(
-                                    fontSize: 17, fontWeight: FontWeight.bold)),
-                            GestureDetector(
-                              onTap: () {},
-                              child: const Text('Xem tất cả',
-                                  style: TextStyle(
-                                      color: _blue,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13)),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        ...recent.map(_item),
-                        const SizedBox(height: 80),
-                      ],
-                    ),
+                  SafeArea(bottom: false, child: _header()),
+                  Positioned(
+                    left: 20,
+                    right: 20,
+                    bottom: -40,
+                    child: _balanceCard(),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 56),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        _summaryCard('Thu nhập', _totalIncome,
+                            Icons.arrow_upward, _green, const Color(0xFFDFF3E6)),
+                        const SizedBox(width: 14),
+                        _summaryCard('Chi tiêu', _totalExpense,
+                            Icons.arrow_downward, _red, const Color(0xFFFDE4E4)),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Giao dịch gần đây',
+                            style: TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.bold)),
+                        GestureDetector(
+                          onTap: () {},
+                          child: const Text('Xem tất cả',
+                              style: TextStyle(
+                                  color: _blue,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    _recentList(),
+                    const SizedBox(height: 80),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openForm(),
@@ -364,8 +305,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         unselectedFontSize: 12,
         onTap: (_) {},
         items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.home), label: 'Trang chủ'),
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Trang chủ'),
           BottomNavigationBarItem(
               icon: Icon(Icons.list_alt), label: 'Giao dịch'),
           BottomNavigationBarItem(
