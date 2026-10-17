@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import '../models/transaction_model.dart';
-import 'transaction_form_screen.dart';
+import 'dashboard_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
@@ -74,10 +73,9 @@ class WelcomeScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: () => Navigator.push(
+                  onPressed: () => Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const TransactionFormScreen()),
+                    MaterialPageRoute(builder: (_) => const DashboardScreen()),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF1565C0),
@@ -89,25 +87,6 @@ class WelcomeScreen extends StatelessWidget {
                       style:
                           TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => TransactionFormScreen(
-                      transaction: TransactionModel(
-                        id: 1,
-                        type: 'expense',
-                        category: 'Ăn uống',
-                        amount: 100000,
-                        date: '12/04/2025',
-                        note: 'Ăn trưa',
-                      ),
-                    ),
-                  ),
-                ),
-                child: const Text('Xem màn Sửa giao dịch (demo)'),
               ),
             ],
           ),
